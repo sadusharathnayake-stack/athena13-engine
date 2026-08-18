@@ -1,13 +1,22 @@
 import os
-import requests
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-FOOTBALL_API_KEY = os.getenv('FOOTBALL_API_KEY')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+# Render Free Tier Web Port
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Athena 13 Active!")
 
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
+
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 current_bankroll = 120.0
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -31,6 +40,7 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📊 [Athena 13] Match: {team_name}\nRecommended Stake: €{stake}")
 
 def main():
+    threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("bankroll", update_bankroll))
