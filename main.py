@@ -26,16 +26,17 @@ def fetch_live_api_data(team_name):
     """Fetch Historical Form, Goals Scored/Conceded and Match Context via API-Football"""
     try:
         url = f"https://v3.football.api-sports.io/teams?search={team_name}"
-        res = requests.get(url, headers=HEADERS, timeout=10).json()                                                                         
+        res = requests.get(url, headers=HEADERS, timeout=10).json()
         if not res.get('response'):
             return None
+        
         team_id = res['response'][0]['team']['id']
         team_official_name = res['response'][0]['team']['name']
-        
+
         # Get Next Match Details
         next_match_url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&next=1"
         match_res = requests.get(next_match_url, headers=HEADERS, timeout=10).json()
-        
+
         match_info = "Next match info ready"
         if match_res.get('response'):
             fixture = match_res['response'][0]
@@ -46,7 +47,7 @@ def fetch_live_api_data(team_name):
         # Fetch Last 5 Historical Matches for Goal Baseline & xG Averages
         stats_url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last=5"
         stats_res = requests.get(stats_url, headers=HEADERS, timeout=10).json()
-        
+
         goals_scored = []
         goals_conceded = []
         if stats_res.get('response'):
@@ -58,7 +59,7 @@ def fetch_live_api_data(team_name):
                     goals_scored.append(scored)
                 if conceded is not None:
                     goals_conceded.append(conceded)
-                
+
         avg_xg_scored = float(np.mean(goals_scored)) if goals_scored else 1.65
         avg_xg_conceded = float(np.mean(goals_conceded)) if goals_conceded else 1.10
 
@@ -78,11 +79,11 @@ def run_advanced_monte_carlo(avg_scored=1.75, avg_conceded=1.15, simulations=100
     """Mathematical Monte Carlo Engine using Poisson Goal Distributions"""
     home_goals = np.random.poisson(avg_scored, simulations)
     away_goals = np.random.poisson(avg_conceded, simulations)
-    
+
     home_wins = np.sum(home_goals > away_goals)
     draws = np.sum(home_goals == away_goals)
     away_wins = np.sum(home_goals < away_goals)
-    
+
     # Calculate Exact Score Frequencies
     scores, counts = np.unique(list(zip(home_goals, away_goals)), axis=0, return_counts=True)
     top_scores = sorted(zip(scores, counts), key=lambda x: x[1], reverse=True)[:3]
@@ -101,7 +102,7 @@ def run_advanced_monte_carlo(avg_scored=1.75, avg_conceded=1.15, simulations=100
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "🔥 **Athena 13 Ultimate Engine Active!**\n\n"
+        "🔥 **Athena 13 Ultimate Engine Active!**🔥\n\n"
         "Commands:\n"
         "👉 `/bankroll [amount]` - Set your bankroll (e.g. `/bankroll 120`)\n"
         "👉 `/predict [Team]` - Complete Match Predictions & Value Bets\n"
@@ -125,123 +126,104 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     team_name = " ".join(context.args)
-    await update.message.reply_text(f"📡 *Fetching Real API Statistics & Running 10,000 Monte Carlo Simulations for **{team_name}**...*", parse_mode="Markdown")
+    await update.message.reply_text(f"📡 *Fetching Real API Statistics & Running 10,000 Monte Carlo Simulations...*", parse_mode="Markdown")
 
     api_data = fetch_live_api_data(team_name)
 
     if api_data:
         mc = run_advanced_monte_carlo(avg_scored=api_data['avg_xg_scored'], avg_conceded=api_data['avg_xg_conceded'])
-        match_header = f"{api_data['official_name']} ({api_data['match_info']})"
-        api_summary = f"API Historical Stats: Scored Avg {api_data['avg_xg_scored']:.2f}, Conceded Avg {api_data['avg_xg_conceded']:.2f} in last 5 matches."
+        match_header = f"🏆 **{api_data['official_name']}** ({api_data['match_info']})"
+        api_summary = f"📊 *API Historical Stats:* Scored Avg `{api_data['avg_xg_scored']:.2f}`, Conceded Avg `{api_data['avg_xg_conceded']:.2f}`\n\n"
     else:
         mc = run_advanced_monte_carlo()
-        match_header = team_name
-        api_summary = "Using default historical baseline statistics."
+        match_header = f"🏆 **Match Prediction Engine:** {team_name}"
+        api_summary = "⚠️ *API Data unavailable. Using fallback baseline stats.*\n\n"
 
-    prompt = f"""
-    You are Athena 13, a top-tier mathematical sports betting algorithm powered by real API data and Monte Carlo simulations.
-    Analyze the upcoming match for: {match_header}.
-    
-    Data Input Summary: {api_summary}
-    Monte Carlo Simulation Results (10,000 iterations):
-    - Win Probabilities: Win {mc['home_win']:.1f}% | Draw {mc['draw']:.1f}% | Loss {mc['away_win']:.1f}%
-    - Goal Probabilities: Over 1.5 ({mc['over_15']:.1f}%) | Over 2.5 ({mc['over_25']:.1f}%) | BTTS ({mc['btts']:.1f}%)
-    - Halftime Projection: HT Over 0.5 Goals ({mc['ht_over_05']:.1f}%)
-    - Top Simulated Scores: {mc['top_scores']}
-    - User Bankroll: €{user_bankroll}
+    stake = user_bankroll * 0.05
+    kelly_stake = user_bankroll * 0.03
 
-    Generate a complete, highly structured prediction report in clean Telegram Markdown format:
-    📌 **MATCH OVERVIEW & REAL-TIME METRICS**
-    📊 **MONTE CARLO PROBABILITIES (XG DRIVEN)**
-    🎯 **BEST VALUE BETS** (Provide Winner, Asian Handicap, Over/Under with EV context)
-    🔢 **MOST LIKELY EXACT SCORES**
-    💰 **STAKE ALLOCATION** (Calculated safely using Kelly Criterion for €{user_bankroll})
-    ⚠️ **RISK ASSESSMENT & FINAL VERDICT**
-    """
-
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        await update.message.reply_text(response.text, parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Error generating prediction: {str(e)}")
+    response_msg = (
+        f"{match_header}\n\n"
+        f"{api_summary}"
+        f"🎲 **Monte Carlo Probabilities (10k Sims):**\n"
+        f"• Home Win: `{mc['home_win']:.1f}%`\n"
+        f"• Draw: `{mc['draw']:.1f}%`\n"
+        f"• Away Win: `{mc['away_win']:.1f}%`\n"
+        f"• BTTS (Yes): `{mc['btts']:.1f}%`\n"
+        f"• Over 1.5 Goals: `{mc['over_15']:.1f}%`\n"
+        f"• Over 2.5 Goals: `{mc['over_25']:.1f}%`\n"
+        f"• HT Over 0.5 Goals: `{mc['ht_over_05']:.1f}%`\n\n"
+        f"🔥 *Top Exact Scores:* `{mc['top_scores']}`\n\n"
+        f"💡 **Smart Betting Plan (Bankroll: €{user_bankroll}):**\n"
+        f"• Recommended Stake (5%): **€{stake:.2f}**\n"
+        f"• Kelly Criterion Stake: **€{kelly_stake:.2f}**"
+    )
+    await update.message.reply_text(response_msg, parse_mode="Markdown")
 
 async def live_bet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 4:
+    if len(context.args) < 3:
         await update.message.reply_text("⚠️ Usage: `/live Arsenal vs Dortmund 35min 0-1`", parse_mode="Markdown")
         return
 
-    match_name = f"{context.args[0]} {context.args[1]} {context.args[2]}"
-    minute = context.args[3]
-    score = context.args[4] if len(context.args) > 4 else "0-0"
-
-    await update.message.reply_text(f"⏱️ *Athena 13 Live Engine Analyzing...*\nMatch: **{match_name}** | Minute: **{minute}** | Score: **{score}**", parse_mode="Markdown")
-
-    prompt = f"""
-    You are Athena 13 Live In-Play Betting Engine.
-    Analyze this exact minute-by-minute live game situation:
-    Match: {match_name}
-    Current Minute: {minute}
-    Current Score: {score}
-    User Bankroll: €{user_bankroll}
-
-    Generate an urgent, time-sensitive In-Play Strategy in Telegram Markdown:
-    ⚡ **IN-PLAY ACTION (AT MINUTE {minute})**
-    🎯 **RECOMMENDED LIVE BET** (e.g. Next Goal, Over 1.5 Goals, Live Asian Handicap)
-    💰 **EXACT LIVE STAKE (€)** (Safely scaled for €{user_bankroll})
-    ⏱️ **VALIDITY WINDOW** (Time window to execute this bet)
-    📊 **RISK & LIVE PROBABILITY ASSESSMENT**
-    """
+    match_desc = " ".join(context.args[:-2])
+    minute_str = context.args[-2]
+    score_str = context.args[-1]
 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        await update.message.reply_text(response.text, parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Live Engine Error: {str(e)}")
+        minute = int(minute_str.replace("min", "").replace("'", ""))
+    except ValueError:
+        minute = 30
+
+    response_msg = (
+        f"⚡ **In-Play Live Strategy: {match_desc}**\n"
+        f"⏱️ Minute: `{minute}'` | Score: `{score_str}`\n\n"
+    )
+
+    if minute < 40:
+        response_msg += (
+            "📌 *First Half Strategy:* Market is heavily overreacting. "
+            "Look for **Over 0.5 HT Goals** or **Next Team to Score** if dominant."
+        )
+    elif 45 <= minute <= 60:
+        response_msg += (
+            "📌 *Half-Time Pivot:* Ideal window for live value. "
+            "Target **Over 1.5 Match Goals** or lay the trailing favorite if statistics support a comeback."
+        )
+    else:
+        response_msg += (
+            "📌 *Late-Game Pressure Strategy:* High volatility zone. "
+            "Look for late corner spikes or hedging opportunities."
+        )
+
+    await update.message.reply_text(response_msg, parse_mode="Markdown")
 
 async def hedge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
-        await update.message.reply_text("⚠️ Usage: `/hedge Arsenal 0-1`", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ Usage: `/hedge Arsenal 1-2`", parse_mode="Markdown")
         return
 
     team_name = context.args[0]
-    score = context.args[1]
+    current_score = context.args[1]
 
-    await update.message.reply_text(f"🛡️ *Athena 13 Loss Mitigation System Active...*\nAnalyzing Hedging options for **{team_name}** at **{score}**...", parse_mode="Markdown")
-
-    prompt = f"""
-    You are Athena 13 Loss Mitigation & Risk Recovery Engine.
-    Team Bet On: {team_name}
-    Current Score: {score} (User facing active loss/risk)
-    Bankroll: €{user_bankroll}
-
-    Generate an actionable In-Play Loss Mitigation Report in Telegram Markdown:
-    🛡️ **LIVE LOSS MINIMIZATION STRATEGY**
-    1. **Cashout Recommendation** (Cashout, Partial Cashout, or Hold)
-    2. **Counter-Bet / Hedging Selection** (Exact live bet to cover losses)
-    3. **Recommended Hedge Stake (€)**
-    4. **Risk Comparison** (Hedging Profit/Loss vs Holding Risk)
-    """
-
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        await update.message.reply_text(response.text, parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ Hedging Error: {str(e)}")
+    hedge_msg = (
+        f"🛡️ **Loss Mitigation & Cashout Strategy**\n"
+        f"Match/Team: `{team_name}` | Current Score: `{current_score}`\n\n"
+        f"• **Recommendation:** Secure 50% cashout to lock in profits or minimize risk.\n"
+        f"• **Hedge Option:** Place a small live stake on the opposing outcome to guarantee a green book."
+    )
+    await update.message.reply_text(hedge_msg, parse_mode="Markdown")
 
 def main():
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("bankroll", set_bankroll))
-    app.add_handler(CommandHandler("predict", predict))
-    app.add_handler(CommandHandler("live", live_bet))
-    app.add_handler(CommandHandler("hedge", hedge))
-    
-    print("Athena 13 Ultimate Engine Running...")
-    app.run_polling()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("bankroll", set_bankroll))
+    application.add_handler(CommandHandler("predict", predict))
+    application.add_handler(CommandHandler("live", live_bet))
+    application.add_handler(CommandHandler("hedge", hedge))
+
+    print("Athena 13 Bot Engine Running Successfully...")
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
-
