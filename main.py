@@ -28,8 +28,8 @@ def fetch_live_api_data(team_name):
         url = f"https://v3.football.api-sports.io/teams?search={team_name}"
         res = requests.get(url, headers=HEADERS, timeout=10).json()                                                                         
         
-            if not res.get('response'):
-                return None
+        if not res.get('response'):
+        return None
             
         team_id = res['response'][0]['team']['id']
         team_official_name = res['response'][0]['team']['name']
