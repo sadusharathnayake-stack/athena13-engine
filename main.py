@@ -3,38 +3,21 @@ import math
 import requests
 import numpy as np
 import sqlite3
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Load Environment Variables from Railway
+logging.basicConfig(level=logging.INFO)
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
-# ---------------------------------------------------------
-# DATABASE SETUP FOR BANKROLL & BET AUDITING
-# ---------------------------------------------------------
 def init_db():
     conn = sqlite3.connect("quant_bot.db")
     cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS bankroll (
-            user_id INTEGER PRIMARY KEY,
-            balance REAL
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS bets_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            match_name TEXT,
-            market TEXT,
-            model_prob REAL,
-            taken_odds REAL,
-            stake REAL,
-            status TEXT
-        )
-    """)
+    cursor.execute("CREATE TABLE IF NOT EXISTS bankroll (user_id INTEGER PRIMARY KEY, balance REAL)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS bets_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, match_name TEXT, market TEXT, model_prob REAL, taken_odds REAL, stake REAL, status TEXT)")
     conn.commit()
     conn.close()
 
@@ -42,14 +25,10 @@ init_db()
 
 HEADERS = {
     'x-rapidapi-host': "v3.football.api-sports.io",
-    'x-rapidapi-key': API_FOOTBALL_KEY
+    'x-rapidapi-key': API_FOOTBALL_KEY if API_FOOTBALL_KEY else ""
 }
 
-# ---------------------------------------------------------
-# 1. DIXON-COLES TAU CORRECTION MATRIX (Low Goal Dependency)
-# ---------------------------------------------------------
 def dixon_coles_tau(x, y, lambda_, mu, rho=-0.13):
-    """ Corrects under/over-estimation for 0-0, 1-0, 0-1, 1-1 scores """
     if x == 0 and y == 0:
         return 1.0 - (lambda_ * mu * rho)
     elif x == 1 and y == 0:
@@ -61,9 +40,6 @@ def dixon_coles_tau(x, y, lambda_, mu, rho=-0.13):
     else:
         return 1.0
 
-# ---------------------------------------------------------
-# 2. WEIGHTED xG & FORM ANALYSIS ENGINE
-# ---------------------------------------------------------
 def fetch_team_xg_stats(team_name):
     try:
         url = f"https://v3.football.api-sports.io/teams?search={team_name}"
@@ -101,22 +77,17 @@ def fetch_team_xg_stats(team_name):
         r_avg_s = float(np.mean(recent_scored)) if recent_scored else s_avg_s
         r_avg_c = float(np.mean(recent_conceded)) if recent_conceded else s_avg_c
 
-        # Weighted Average: 40% Season Baseline + 60% Form
         weighted_s = (s_avg_s * 0.40) + (r_avg_s * 0.60)
         weighted_c = (s_avg_c * 0.40) + (r_avg_c * 0.60)
 
-        # 5% Context Discount for Lineup/Weather safety
         final_xg_scored = max(weighted_s * 0.95, 0.35)
         final_xg_conceded = max(weighted_c * 0.95, 0.35)
 
         return {"name": team_official_name, "avg_scored": final_xg_scored, "avg_conceded": final_xg_conceded}
     except Exception as e:
-        print(f"Error fetching stats for {team_name}: {e}")
+        print(f"Error: {e}")
         return None
 
-# ---------------------------------------------------------
-# 3. DIXON-COLES MONTE CARLO ENGINE (15,000 Rounds)
-# ---------------------------------------------------------
 def run_dixon_coles_simulation(home_s, home_c, away_s, away_c, simulations=15000):
     exp_home = (home_s + away_c) / 2.0
     exp_away = (away_s + home_c) / 2.0
@@ -153,11 +124,7 @@ def run_dixon_coles_simulation(home_s, home_c, away_s, away_c, simulations=15000
     }
     return probs
 
-# ---------------------------------------------------------
-# 4. DE-VIGGING & DYNAMIC KELLY STAKE CALCULATOR
-# ---------------------------------------------------------
 def devig_odds(odds_1, odds_2):
-    """ Strips bookmaker margin to get true fair odds """
     implied_1 = 1.0 / odds_1
     implied_2 = 1.0 / odds_2
     margin = implied_1 + implied_2
@@ -170,11 +137,8 @@ def calculate_dynamic_kelly(prob_pct, odds, bankroll):
     if b <= 0: return 0.0
     f_star = (p * b - q) / b
     if f_star <= 0: return 0.0
-    return min(bankroll * (f_star * 0.25), bankroll * 0.05) # Quarter Kelly capped at 5%
+    return min(bankroll * (f_star * 0.25), bankroll * 0.05)
 
-# ---------------------------------------------------------
-# TELEGRAM BOT HANDLERS
-# ---------------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_msg = (
         "🏛️ **ATHENA 13 S-TIER QUANT ENGINE ACTIVE**\n\n"
@@ -201,11 +165,7 @@ async def set_bankroll(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def hedge_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if len(context.args) < 3:
-            await update.message.reply_text(
-                "⚠️ **Usage:** `/hedge [Original Stake] [Original Odds] [Current Counter Odds]`\n\n"
-                "👉 **Example:** `/hedge 100 2.00 1.35`", 
-                parse_mode="Markdown"
-            )
+            await update.message.reply_text("⚠️ Usage: `/hedge 100 2.00 1.35`", parse_mode="Markdown")
             return
 
         orig_stake = float(context.args[0])
@@ -219,15 +179,13 @@ async def hedge_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response_msg = (
             f"🛡️ **QUANT HEDGING & RISK MITIGATION**\n\n"
             f"• Original Bet: **€{orig_stake:.2f}** @ `{orig_odds:.2f}`\n"
-            f"• Live Counter Market Odds: `{counter_odds:.2f}`\n\n"
+            f"• Live Counter Odds: `{counter_odds:.2f}`\n\n"
             f"🎯 **REQUIRED HEDGE STAKE:**\n"
-            f"• Bet exactly **€{hedge_stake:.2f}** on the Counter Outcome.\n\n"
+            f"• Bet exactly **€{hedge_stake:.2f}** on Counter Outcome.\n\n"
             f"📈 **POSITION SUMMARY:**\n"
-            f"• Capped Net Result: **€{net_result:.2f}**\n"
-            f"💡 *Risk mitigated using exact Institutional Dutching Math.*"
+            f"• Capped Net Result: **€{net_result:.2f}**"
         )
         await update.message.reply_text(response_msg, parse_mode="Markdown")
-
     except ValueError:
         await update.message.reply_text("❌ Invalid numbers. Example: `/hedge 100 2.00 1.35`", parse_mode="Markdown")
 
@@ -267,7 +225,7 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not high_value:
         await update.message.reply_text(
-            f"🚫 **NO TRADE:** No outcome met the Strict 85%+ Probability Threshold for {home_data['name']} vs {away_data['name']}.", 
+            f"🚫 **NO TRADE:** No outcome met the Strict 85%+ Threshold for {home_data['name']} vs {away_data['name']}.", 
             parse_mode="Markdown"
         )
         return
@@ -288,17 +246,12 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
     out_str += f"🏦 DB Bankroll: **€{bankroll:.2f}** | CLV Tracking Active 📈"
     await update.message.reply_text(out_str, parse_mode="Markdown")
 
-# ---------------------------------------------------------
-# APPLICATION INITIALIZATION
-# ---------------------------------------------------------
 def main():
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("bankroll", set_bankroll))
     app.add_handler(CommandHandler("predict", predict))
     app.add_handler(CommandHandler("hedge", hedge_calculator))
-
     print("Athena 13 S-Tier Quant Engine Online...")
     app.run_polling()
 
