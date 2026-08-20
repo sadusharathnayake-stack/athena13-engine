@@ -178,10 +178,12 @@ async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
         away_data = {"name": "Opponent Baseline", "avg_scored": 1.10, "avg_conceded": 1.40}
 
     probs = run_dixon_coles_simulation(home_data['avg_scored'], home_data['avg_conceded'], away_data['avg_scored'], away_data['avg_conceded'])
-    high_value = [(m, p, 1.0 / (p / 100.0)) for m, p in probs.items() if p >= 85.0]
+    
+    # Updated: Top 4 Markets with 65%+ Probability
+    high_value = sorted([(m, p, 1.0 / (p / 100.0)) for m, p in probs.items() if p >= 65.0], key=lambda x: x[1], reverse=True)[:4]
 
     if not high_value:
-        await update.message.reply_text(f"🚫 **NO TRADE:** No outcome met 85%+ threshold.", parse_mode="Markdown")
+        await update.message.reply_text(f"🚫 **NO TRADE:** No outcome met 65%+ threshold.", parse_mode="Markdown")
         return
 
     out_str = f"🏆 **QUANT ANALYSIS: {home_data['name']} vs {away_data['name']}**\n\n"
