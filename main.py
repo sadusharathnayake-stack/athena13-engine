@@ -72,7 +72,6 @@ def fetch_team_xg_stats(team_name):
 def run_dixon_coles_simulation(home_s, home_c, away_s, away_c, simulations=15000):
     exp_home = (home_s + away_c) / 2.0
     exp_away = (away_s + home_c) / 2.0
-
     max_goals = 8
     prob_matrix = np.zeros((max_goals, max_goals))
 
@@ -84,7 +83,6 @@ def run_dixon_coles_simulation(home_s, home_c, away_s, away_c, simulations=15000
             prob_matrix[h, a] = p_h * p_a * tau
 
     prob_matrix /= np.sum(prob_matrix)
-
     flat_indices = np.random.choice(prob_matrix.size, size=simulations, p=prob_matrix.flatten())
     home_goals, away_goals = np.unravel_index(flat_indices, prob_matrix.shape)
 
@@ -120,80 +118,65 @@ def calculate_dynamic_kelly(prob_pct, odds, bankroll):
     return min(bankroll * (f_star * 0.25), bankroll * 0.05)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_msg = "🏛️ **ATHENA 13 S-TIER QUANT ENGINE ACTIVE**\n\nCommands:\n👉 `/predict Arsenal vs Chelsea`\n👉 `/bankroll 500`\n👉 `/hedge 100 2.00 1.35`"
-    await update.message.reply_text(welcome_msg, parse_mode="Markdown")
+    msg = "🏛️ **ATHENA 13 S-TIER QUANT ENGINE ACTIVE**\n\nCommands:\n👉 `/predict Arsenal vs Chelsea`\n👉 `/bankroll 500`\n👉 `/hedge 100 2.00 1.35`"
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def set_bankroll(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    u_id = update.effective_user.id
+    if not context.args: return await update.message.reply_text("⚠️ Usage: `/bankroll 500`", parse_mode="Markdown")
     try:
-        amount = float(context.args[0])
+        amt = float(context.args[0])
         conn = sqlite3.connect("quant_bot.db")
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO bankroll (user_id, balance) VALUES (?, ?)", (user_id, amount))
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO bankroll (user_id, balance) VALUES (?, ?)", (u_id, amt))
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"✅ Bankroll locked in DB: **€{amount:.2f}**", parse_mode="Markdown")
-    except Exception:
-        await update.message.reply_text("⚠️ Usage: `/bankroll 500`", parse_mode="Markdown")
+        await update.message.reply_text(f"✅ Bankroll locked in DB: **€{amt:.2f}**", parse_mode="Markdown")
+    except Exception: await update.message.reply_text("⚠️ Usage: `/bankroll 500`", parse_mode="Markdown")
 
 async def hedge_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 3: return await update.message.reply_text("⚠️ Usage: `/hedge 100 2.00 1.35`", parse_mode="Markdown")
     try:
-        if len(context.args) < 3:
-            await update.message.reply_text("⚠️ Usage: `/hedge 100 2.00 1.35`", parse_mode="Markdown")
-            return
-        orig_stake = float(context.args[0])
-        orig_odds = float(context.args[1])
-        counter_odds = float(context.args[2])
-        target_payout = orig_stake * orig_odds
-        hedge_stake = target_payout / counter_odds
-        net_result = (hedge_stake * counter_odds) - orig_stake - hedge_stake
-        await update.message.reply_text(f"🛡️ **HEDGE CALCULATION**\n• Bet **€{hedge_stake:.2f}** on Counter Outcome.\n• Capped Net: **€{net_result:.2f}**", parse_mode="Markdown")
-    except Exception:
-        await update.message.reply_text("❌ Invalid numbers. Example: `/hedge 100 2.00 1.35`", parse_mode="Markdown")
+        stk, odds, c_odds = float(context.args[0]), float(context.args[1]), float(context.args[2])
+        payout = stk * odds
+        h_stk = payout / c_odds
+        net = (h_stk * c_odds) - stk - h_stk
+        await update.message.reply_text(f"🛡️ **HEDGE CALCULATION**\n• Bet **€{h_stk:.2f}** on Counter Outcome.\n• Capped Net: **€{net:.2f}**", parse_mode="Markdown")
+    except Exception: await update.message.reply_text("❌ Invalid numbers. Example: `/hedge 100 2.00 1.35`", parse_mode="Markdown")
 
 async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    u_id = update.effective_user.id
     conn = sqlite3.connect("quant_bot.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT balance FROM bankroll WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
+    c = conn.cursor()
+    c.execute("SELECT balance FROM bankroll WHERE user_id = ?", (u_id,))
+    row = c.fetchone()
     bankroll = row[0] if row else 100.0
     conn.close()
 
-    if not context.args:
-        await update.message.reply_text("⚠️ Usage: `/predict TeamA vs TeamB`", parse_mode="Markdown")
-        return
+    if not context.args: return await update.message.reply_text("⚠️ Usage: `/predict TeamA vs TeamB`", parse_mode="Markdown")
 
     text = " ".join(context.args)
     teams = text.lower().split(" vs ") if " vs " in text.lower() else [text, ""]
     await update.message.reply_text("⚡ *Running Dixon-Coles Simulation...*", parse_mode="Markdown")
 
-    home_data = fetch_team_xg_stats(teams[0].strip())
-    away_data = fetch_team_xg_stats(teams[1].strip()) if teams[1] else None
+    h_data = fetch_team_xg_stats(teams[0].strip())
+    a_data = fetch_team_xg_stats(teams[1].strip()) if teams[1] else None
 
-    if not home_data:
-        await update.message.reply_text("❌ Home team not found.", parse_mode="Markdown")
-        return
-    if not away_data:
-        away_data = {"name": "Opponent Baseline", "avg_scored": 1.10, "avg_conceded": 1.40}
+    if not h_data: return await update.message.reply_text("❌ Home team not found.", parse_mode="Markdown")
+    if not a_data: a_data = {"name": "Opponent Baseline", "avg_scored": 1.10, "avg_conceded": 1.40}
 
-    probs = run_dixon_coles_simulation(home_data['avg_scored'], home_data['avg_conceded'], away_data['avg_scored'], away_data['avg_conceded'])
-    
-    # Updated: Top 4 Markets with 65%+ Probability
+    probs = run_dixon_coles_simulation(h_data['avg_scored'], h_data['avg_conceded'], a_data['avg_scored'], a_data['avg_conceded'])
     high_value = sorted([(m, p, 1.0 / (p / 100.0)) for m, p in probs.items() if p >= 65.0], key=lambda x: x[1], reverse=True)[:4]
 
-    if not high_value:
-        await update.message.reply_text(f"🚫 **NO TRADE:** No outcome met 65%+ threshold.", parse_mode="Markdown")
-        return
+    if not high_value: return await update.message.reply_text("🚫 **NO TRADE:** No outcome met 65%+ threshold.", parse_mode="Markdown")
 
-    out_str = f"🏆 **QUANT ANALYSIS: {home_data['name']} vs {away_data['name']}**\n\n"
+    out_str = f"🏆 **QUANT ANALYSIS: {h_data['name']} vs {a_data['name']}**\n\n"
     for market, prob, target_odds in high_value:
-        simulated_pinnacle = round(target_odds * 1.07, 2)
-        devigged_fair_odds = devig_odds(simulated_pinnacle, 2.10)
-        ev_pct = ((prob / 100.0) * devigged_fair_odds - 1.0) * 100
-        stake = calculate_dynamic_kelly(prob, devigged_fair_odds, bankroll)
-
-        out_str += f"🔥 **Market: {market}**\n   • Probability: `{prob:.1f}%` | Fair Odds: `{devigged_fair_odds:.2f}`\n   • Expected Value (+EV): `+{ev_pct:.2f}%`\n   • Stake: **€{stake:.2f}**\n\n"
+        sim_pinnacle = round(target_odds * 1.07, 2)
+        devigged_fair = devig_odds(sim_pinnacle, 2.10)
+        ev_pct = ((prob / 100.0) * devigged_fair - 1.0) * 100
+        stake = calculate_dynamic_kelly(prob, devigged_fair, bankroll)
+        out_str += f"🔥 **Market: {market}**\n   • Probability: `{prob:.1f}%` | Fair Odds: `{devigged_fair:.2f}`\n   • Expected Value (+EV): `+{ev_pct:.2f}%`\n   • Stake: **€{stake:.2f}**\n\n"
 
     out_str += f"🏦 Bankroll: **€{bankroll:.2f}**"
     await update.message.reply_text(out_str, parse_mode="Markdown")
