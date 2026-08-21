@@ -3,7 +3,6 @@ import time
 import asyncio
 import requests
 import random
-import math
 import google.generativeai as genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
@@ -57,15 +56,10 @@ def fetch_stadium_weather(city="London"):
 
 def run_full_monte_carlo(home_xG=1.65, away_xG=1.20):
     weather = fetch_stadium_weather()
-    temp_factor = 0.97 if weather["temp"] > 30 or weather["temp"] < 5 else 1.0
-    wind_factor = 0.94 if weather["wind"] > 25 else 1.0
-    humidity_factor = 0.99 if weather["humidity"] > 80 else 1.0
-    
     home_wins = 0
     draws = 0
     away_wins = 0
     simulations = 12000
-
     for _ in range(simulations):
         h_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[0.2, 0.35, 0.25, 0.12, 0.05, 0.03])[0]
         a_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[0.35, 0.35, 0.18, 0.08, 0.03, 0.01])[0]
@@ -75,7 +69,6 @@ def run_full_monte_carlo(home_xG=1.65, away_xG=1.20):
             draws += 1
         else:
             away_wins += 1
-
     return {
         "home_prob": round((home_wins / simulations) * 100, 1),
         "draw_prob": round((draws / simulations) * 100, 1),
@@ -86,7 +79,7 @@ def run_full_monte_carlo(home_xG=1.65, away_xG=1.20):
 def generate_ai_insight(match_name, sim_data):
     if not ai_model:
         return "Gemini AI API Key not configured."
-    prompt = f"Analyze match {match_name}. Home: {sim_data['home_prob']}%, Draw: {sim_data['draw_prob']}%, Away: {sim_data['away_prob']}%. Temp: {sim_data['weather']['temp']}C. Give 2 sentence professional betting insight on expected value."
+    prompt = f"Analyze match {match_name}. Home: {sim_data['home_prob']}%, Draw: {sim_data['draw_prob']}%, Away: {sim_data['away_prob']}%. Give 2 sentence professional betting insight."
     try:
         response = ai_model.generate_content(prompt)
         return response.text.strip()
@@ -111,10 +104,8 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         match = odds_data[0]
         home = match.get('home_team', 'Home Team')
         away = match.get('away_team', 'Away Team')
-    
     sim = run_full_monte_carlo()
-    ai_text = generate_ai_insight(f"{home} vs {away}", sim)
-    
+    ai_text = generate_ai_insight(home + " vs " + away, sim)
     report = "ATHENA QUANT REPORT: " + home + " vs " + away + "\n"
     report += "----------------------------------\n"
     report += "Home Win Prob: " + str(sim['home_prob']) + "%\n"
@@ -124,7 +115,6 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     report += "Gemini AI Insight:\n" + ai_text + "\n\n"
     report += "Recommendation: BACK Home (+EV)\n"
     report += "Kelly Stake: EUR 10.00"
-    
     await query.edit_message_text(text=report)
 
 async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -154,10 +144,8 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("matches", matches_command))
     app.add_handler(CommandHandler("bankroll", bankroll_command))
     app.add_handler(CallbackQueryHandler(button_click_handler))
-    
     loop = asyncio.get_event_loop()
     loop.create_task(auto_value_scanner(app))
-    
     print("Full Athena Quant Engine Online!")
     app.run_polling(drop_pending_updates=True)
 
