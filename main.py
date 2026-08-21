@@ -127,22 +127,18 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     report = "📊 ATHENA PREDICTION REPORT: " + home + " vs " + away + "\n"
     report += "--------------------------------------------------\n"
     report += "🏠 Home: " + str(sim['home_prob']) + "% | 🤝 Draw: " + str(sim['draw_prob']) + "% | 🚀 Away: " + str(sim['away_prob']) + "%\n\n"
-    
     report += "🔥 Market: Back Home Win (1X2)\n"
     report += "• Probability: " + str(sim['home_prob']) + "% | Fair Odds: 1.85\n"
     report += "• Expected Value (+EV): +14.2%\n"
     report += "• Stake: €5.00 (Kelly)\n\n"
-    
     report += "🔥 Market: Back Over 2.5 Goals\n"
     report += "• Probability: 64.5% | Fair Odds: 1.55\n"
     report += "• Expected Value (+EV): +18.6%\n"
     report += "• Stake: €7.50 (Kelly)\n\n"
-    
     report += "🔥 Market: Asian Handicap Home -0.5\n"
     report += "• Probability: " + str(sim['home_prob']) + "% | Fair Odds: 1.90\n"
     report += "• Expected Value (+EV): +11.3%\n"
     report += "• Stake: €5.00 (Kelly)\n\n"
-    
     report += "🌡️ Climate: " + str(sim['weather']['temp']) + "°C | Wind: " + str(sim['weather']['wind']) + " km/h\n\n"
     report += "🧠 Gemini AI Insight:\n" + ai_text + "\n\n"
     report += "💰 Bankroll: €100.00"
