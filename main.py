@@ -4,12 +4,8 @@ import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# --- ENVIRONMENT VARIABLES ---
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# --- TELEGRAM TOKEN (Directly set to avoid Railway env variable issues) ---
+TELEGRAM_TOKEN = "8208471929:AAFFRzvk2QamfEneHG1w4SBoX1kRk4tlf5k"
 
 # --- MOCK / LIVE FIXTURES DATA ---
 TODAY_MATCHES = [
@@ -231,13 +227,10 @@ async def hedge_calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ දත්ත වැරදියි! කරුණාකර අංක පමණක් ලබා දෙන්න (උදා: 10 2.50 4.00)")
         return
     
-    # Potential payout of original bet
     orig_payout = orig_stake * orig_odds
-    
-    # Calculate optimal cover stake to guarantee equal profit / zero loss (Hedging formula)
     cover_stake = orig_payout / cover_odds
     total_invested = orig_stake + cover_stake
-    guaranteed_return = orig_payout  # or (cover_stake * cover_odds)
+    guaranteed_return = orig_payout
     net_profit = guaranteed_return - total_invested
     
     hedge_report = (
@@ -267,7 +260,7 @@ async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- MAIN APPLICATION INITIALIZATION ---
 def main():
     if not TELEGRAM_TOKEN:
-        print("Error: TELEGRAM_TOKEN environment variable missing!")
+        print("Error: TELEGRAM_TOKEN missing!")
         return
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
