@@ -23,9 +23,11 @@ if GEMINI_API_KEY:
 else:
     gemini_model = None
 
-# --- 1. LIVE FOOTBALL API: FETCH TODAY'S FIXTURES (SRI LANKA TIME) ---
+# --- 1. LIVE FOOTBALL API: FETCH TODAY'S FIXTURES & STATUS ---
 def get_today_fixtures():
     fixtures = []
+    api_status = "❌ API Disconnected / No Key"
+    
     if FOOTBALL_API_KEY:
         try:
             today_date = datetime.now(IST).strftime('%Y-%m-%d')
@@ -35,18 +37,20 @@ def get_today_fixtures():
                 'x-rapidapi-host': 'v3.football.api-sports.io'
             }
             response = requests.get(url, headers=headers, timeout=10)
+            print(f"API Response Code: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json().get("response", [])
-                current_time = datetime.now(IST)
+                api_status = f"✅ API Connected (Matches Found: {len(data)})"
+                print(api_status)
                 
                 for match in data:
                     utc_time_str = match['fixture']['date']
                     match_utc = datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
                     match_ist = match_utc.astimezone(IST)
                     
-                    # අද දිනට අදාළ මැච් පමණක් ফিল্টার කිරීම
                     tier = "Mega" if match['league']['name'] in ["Premier League", "La Liga", "UEFA Champions League", "Serie A", "Bundesliga"] else "Domestic"
-                    time_formatted = match_ist.strftime('%I:%M %p') # උදා: 08:30 PM
+                    time_formatted = match_ist.strftime('%I:%M %p')
                     
                     fixtures.append({
                         "id": match['fixture']['id'],
@@ -59,16 +63,58 @@ def get_today_fixtures():
                         "time": time_formatted,
                         "venue": match.get('fixture', {}).get('venue', {}).get('city', 'Stadium')
                     })
+            else:
+                api_status = f"⚠️ API Error Status: {response.status_code}"
         except Exception as e:
-            print(f"Football API Error: {e}")
+            api_status = f"❌ API Exception: {e}"
+            print(api_status)
             
-    # API එකෙන් මැච් නොලැබුනහොත් හෝ වෙනත් දෝෂයකදී පෙන්වන Fallback ලැයිස්තුව
+    # API එකෙන් මැච් නැති නම් හෝ දෝෂයක් නම් Fallback ලැයිස්තුව පෙන්වීම
     if not fixtures:
         fixtures = [
             {"id": 33, "home": "Manchester United", "away": "Arsenal", "home_id": 33, "away_id": 42, "tier": "Mega", "league": "Premier League", "time": "Today", "venue": "Manchester"},
             {"id": 34, "home": "Chelsea", "away": "Liverpool", "home_id": 49, "away_id": 40, "tier": "Mega", "league": "Premier League", "time": "Today", "venue": "London"}
         ]
-    return fixtures
+    return fixtures, api_status
+
+# --- SEARCH TEAM DYNAMICALLY FROM API IF NOT IN LIST ---
+def search_team_fixture(team_name):
+    if FOOTBALL_API_KEY:
+        try:
+            # First search team ID
+            search_url = f"https://v3.football.api-sports.io/teams?search={team_name}"
+            headers = {
+                'x-rapidapi-key': FOOTBALL_API_KEY,
+                'x-rapidapi-host': 'v3.football.api-sports.io'
+            }
+            res = requests.get(search_url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                teams_data = res.json().get("response", [])
+                if teams_data:
+                    team_id = teams_data[0]['team']['id']
+                    team_official_name = teams_data[0]['team']['name']
+                    
+                    # Get next fixture for this team
+                    fix_url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&next=1"
+                    fix_res = requests.get(fix_url, headers=headers, timeout=5)
+                    if fix_res.status_code == 200:
+                        fix_data = fix_res.json().get("response", [])
+                        if fix_data:
+                            m = fix_data[0]
+                            return {
+                                "id": m['fixture']['id'],
+                                "home": m['teams']['home']['name'],
+                                "away": m['teams']['away']['name'],
+                                "home_id": m['teams']['home']['id'],
+                                "away_id": m['teams']['away']['id'],
+                                "tier": "Mega",
+                                "league": m['league']['name'],
+                                "time": "Upcoming",
+                                "venue": m.get('fixture', {}).get('venue', {}).get('city', 'Stadium')
+                            }
+        except Exception as e:
+            print(f"Team Search Error: {e}")
+    return None
 
 # --- 2. LIVE WEATHER API ---
 def get_live_weather(venue_city):
@@ -279,8 +325,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔥 *Athena Quant Engine: Ultimate Gemini AI Edition* 🔥\n\n"
         "✨ *Connected to Lineups, Live Stats, Weather & Gemini AI (SL Time)*\n\n"
         "📌 *Commands:*\n"
-        "• `/matches` - View today's fixtures (Sri Lanka Time)\n"
-        "• `/analyze_full [Index/Name]` - Deep AI Quant Report with Lineups\n"
+        "• `/matches` - View today's fixtures & API Status\n"
+        "• `/analyze_full [Index or Team Name]` - Deep AI Quant Report\n"
         "• `/live_analyze [Index/Name]` - Live In-Play Tactical Scan\n"
         "• `/hedge_calc [Stake] [Original Odds] [Cover Odds]`\n"
         "• `/bankroll`"
@@ -288,49 +334,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    fixtures, api_status = get_today_fixtures()
     keyboard = [
         [InlineKeyboardButton("🏆 Top Tier Fixtures", callback_data="tier_premier")],
         [InlineKeyboardButton("⚽ Domestic / Other Fixtures", callback_data="tier_domestic")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("කරුණාකර ලීගය තෝරන්න:", reply_markup=reply_markup)
+    
+    status_msg = f"🔌 *API Status:* {api_status}\n\nකරුණාකර ලීගය තෝරන්න:"
+    await update.message.reply_text(status_msg, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    fixtures = get_today_fixtures()
+    fixtures, api_status = get_today_fixtures()
     selected_tier = "Mega" if "premier" in query.data else "Domestic"
     filtered = [m for m in fixtures if m["tier"] == selected_tier]
     if not filtered: filtered = fixtures
         
-    text = f"🇱🇰 *Today's Fixtures (Sri Lanka Time - {selected_tier}):*\n\n"
+    text = f"🇱🇰 *Today's Fixtures ({selected_tier}):*\n🔌 _{api_status}_\n\n"
     for idx, m in enumerate(filtered):
         match_time = m.get('time', 'Today')
         text += f"[{idx}] {m['home']} vs {m['away']}\n    🕒 *Time:* {match_time} | 🏆 _{m.get('league', 'League')}_\n\n"
-    text += "👉 Use: `/analyze_full [Index]`"
+    text += "👉 Use: `/analyze_full [Index]` or `/analyze_full Real Madrid`"
     await query.edit_message_text(text=text, parse_mode="Markdown")
 
 async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ මචන් Match Index එකක් හෝ Team Name එකක් දෙන්න!\nඋදා: `/analyze_full 0`", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ මචන් Match Index එකක් හෝ Team Name එකක් දෙන්න!\nඋදා: `/analyze_full 0` හෝ `/analyze_full Arsenal`", parse_mode="Markdown")
         return
     
     query_arg = " ".join(context.args).lower()
-    fixtures = get_today_fixtures()
+    fixtures, api_status = get_today_fixtures()
     matched = None
     
     if query_arg.isdigit():
         idx = int(query_arg)
-        if 0 <= idx < len(fixtures): matched = fixtures[idx]
+        if 0 <= idx < len(fixtures): 
+            matched = fixtures[idx]
     else:
+        # Check in current fetched fixtures first
         for m in fixtures:
             if query_arg in m["home"].lower() or query_arg in m["away"].lower():
                 matched = m
                 break
+        # If not found, search dynamically from API using custom team name!
+        if not matched:
+            await update.message.reply_text(f"🔍 '{query_arg}' සඳහා API එකෙන් සෘජුවම මැච් එකක් සොයමින් පවතී...")
+            matched = search_team_fixture(" ".join(context.args))
                 
     if not matched:
-        await update.message.reply_text("❌ මැච් එක හමු නොවීය.")
+        await update.message.reply_text(f"❌ '{query_arg}' සඳහා ක්‍රියාකාරී මැච් එකක් හමු නොවීය. (API Status: {api_status})")
         return
 
     res = run_advanced_quant_simulation(matched)
@@ -359,12 +414,26 @@ async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def live_analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ මැච් එකක් සඳහා Index එකක් දෙන්න!\nඋදා: `/live_analyze 0`", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ මැච් එකක් සඳහා Index එකක් හෝ Team Name එකක් දෙන්න!\nඋදා: `/live_analyze 0`", parse_mode="Markdown")
         return
     
     query_arg = " ".join(context.args).lower()
-    fixtures = get_today_fixtures()
-    matched = fixtures[int(query_arg)] if query_arg.isdigit() and int(query_arg) < len(fixtures) else fixtures[0]
+    fixtures, _ = get_today_fixtures()
+    matched = None
+    
+    if query_arg.isdigit() and int(query_arg) < len(fixtures):
+        matched = fixtures[int(query_arg)]
+    else:
+        for m in fixtures:
+            if query_arg in m["home"].lower() or query_arg in m["away"].lower():
+                matched = m
+                break
+        if not matched:
+            matched = search_team_fixture(" ".join(context.args))
+
+    if not matched:
+        await update.message.reply_text("❌ මැච් එක හමු නොවීය.")
+        return
     
     res = run_advanced_quant_simulation(matched)
     live_stats = get_live_match_stats(matched["id"])
@@ -408,7 +477,7 @@ def main():
     app.add_handler(CommandHandler("bankroll", bankroll_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Athena Gemini AI Quant Master Bot is running with Sri Lanka Time support...")
+    print("Athena Gemini AI Quant Master Bot is running with API Status & Custom Team Search...")
     app.run_polling()
 
 if __name__ == "__main__":
