@@ -263,7 +263,16 @@ def main():
         print("Error: TELEGRAM_TOKEN missing!")
         return
 
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    # මෙන්න මෙතන Timeout සෙටින් ටික එකතු කර ඇත (TimedOut Error එක මඟහරවා ගැනීමට)
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .read_timeout(30)
+        .write_timeout(30)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("matches", matches_command))
