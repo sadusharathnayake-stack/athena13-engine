@@ -33,8 +33,7 @@ def get_today_fixtures():
             today_date = datetime.now(IST).strftime('%Y-%m-%d')
             url = f"https://v3.football.api-sports.io/fixtures?date={today_date}"
             headers = {
-                'x-rapidapi-key': FOOTBALL_API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
+                'x-apisports-key': FOOTBALL_API_KEY
             }
             response = requests.get(url, headers=headers, timeout=10)
             print(f"API Response Code: {response.status_code}")
@@ -81,20 +80,16 @@ def get_today_fixtures():
 def search_team_fixture(team_name):
     if FOOTBALL_API_KEY:
         try:
-            # First search team ID
             search_url = f"https://v3.football.api-sports.io/teams?search={team_name}"
             headers = {
-                'x-rapidapi-key': FOOTBALL_API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
+                'x-apisports-key': FOOTBALL_API_KEY
             }
             res = requests.get(search_url, headers=headers, timeout=5)
             if res.status_code == 200:
                 teams_data = res.json().get("response", [])
                 if teams_data:
                     team_id = teams_data[0]['team']['id']
-                    team_official_name = teams_data[0]['team']['name']
                     
-                    # Get next fixture for this team
                     fix_url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&next=1"
                     fix_res = requests.get(fix_url, headers=headers, timeout=5)
                     if fix_res.status_code == 200:
@@ -139,8 +134,7 @@ def get_team_injuries(fixture_id):
         try:
             url = f"https://v3.football.api-sports.io/injuries?fixture={fixture_id}"
             headers = {
-                'x-rapidapi-key': FOOTBALL_API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
+                'x-apisports-key': FOOTBALL_API_KEY
             }
             response = requests.get(url, headers=headers, timeout=5)
             if response.status_code == 200:
@@ -155,8 +149,7 @@ def get_match_lineups(fixture_id):
         try:
             url = f"https://v3.football.api-sports.io/fixtures/lineups?fixture={fixture_id}"
             headers = {
-                'x-rapidapi-key': FOOTBALL_API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
+                'x-apisports-key': FOOTBALL_API_KEY
             }
             response = requests.get(url, headers=headers, timeout=5)
             if response.status_code == 200:
@@ -184,8 +177,7 @@ def get_live_match_stats(fixture_id):
         try:
             url = f"https://v3.football.api-sports.io/fixtures/statistics?fixture={fixture_id}"
             headers = {
-                'x-rapidapi-key': FOOTBALL_API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
+                'x-apisports-key': FOOTBALL_API_KEY
             }
             response = requests.get(url, headers=headers, timeout=5)
             if response.status_code == 200:
@@ -221,8 +213,7 @@ def get_advanced_match_stats(home_id, away_id):
         try:
             h2h_url = f"https://v3.football.api-sports.io/fixtures/headtohead?h2h={home_id}-{away_id}"
             headers = {
-                'x-rapidapi-key': FOOTBALL_API_KEY,
-                'x-rapidapi-host': 'v3.football.api-sports.io'
+                'x-apisports-key': FOOTBALL_API_KEY
             }
             h2h_res = requests.get(h2h_url, headers=headers, timeout=5)
             if h2h_res.status_code == 200:
@@ -374,12 +365,10 @@ async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYP
         if 0 <= idx < len(fixtures): 
             matched = fixtures[idx]
     else:
-        # Check in current fetched fixtures first
         for m in fixtures:
             if query_arg in m["home"].lower() or query_arg in m["away"].lower():
                 matched = m
                 break
-        # If not found, search dynamically from API using custom team name!
         if not matched:
             await update.message.reply_text(f"🔍 '{query_arg}' සඳහා API එකෙන් සෘජුවම මැච් එකක් සොයමින් පවතී...")
             matched = search_team_fixture(" ".join(context.args))
@@ -461,7 +450,7 @@ async def hedge_calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     orig_payout = orig_stake * orig_odds
     cover_stake = orig_payout / cover_odds
     net_profit = orig_payout - (orig_stake + cover_stake)
-    await update.message.reply_text(f"⚖️ *Hedge Cover Stake:* €{round(cover_stake, 2)} | *Net Profit:* €{round(net_profit, 2)}", parse_mode="Markdown")
+    await update.message.reply_text(f"⚖️ *Hedge Cover Stake:* €{round(cover_stake, 2)} | *Net Profit:* €{round(net_profit, 2)}", parse_M="Markdown")
 
 async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💰 *Bankroll:* €100.00 | Protected & Gemini AI Synced.", parse_mode="Markdown")
@@ -477,7 +466,7 @@ def main():
     app.add_handler(CommandHandler("bankroll", bankroll_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Athena Gemini AI Quant Master Bot is running with API Status & Custom Team Search...")
+    print("Athena Gemini AI Quant Master Bot is running with API-Sports Headers & Custom Team Search...")
     app.run_polling()
 
 if __name__ == "__main__":
