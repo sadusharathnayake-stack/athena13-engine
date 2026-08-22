@@ -1,6 +1,7 @@
 import os
 import random
 import requests
+from datetime import datetime, timezone, timedelta
 import google.generativeai as genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -12,6 +13,9 @@ ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# Sri Lanka Time Zone (UTC +5:30)
+IST = timezone(timedelta(hours=5, minutes=30))
+
 # Configure Gemini AI
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -19,12 +23,13 @@ if GEMINI_API_KEY:
 else:
     gemini_model = None
 
-# --- 1. LIVE FOOTBALL API: FETCH REAL FIXTURES ---
+# --- 1. LIVE FOOTBALL API: FETCH TODAY'S FIXTURES (SRI LANKA TIME) ---
 def get_today_fixtures():
     fixtures = []
     if FOOTBALL_API_KEY:
         try:
-            url = "https://v3.football.api-sports.io/fixtures?live=all"
+            today_date = datetime.now(IST).strftime('%Y-%m-%d')
+            url = f"https://v3.football.api-sports.io/fixtures?date={today_date}"
             headers = {
                 'x-rapidapi-key': FOOTBALL_API_KEY,
                 'x-rapidapi-host': 'v3.football.api-sports.io'
@@ -32,24 +37,36 @@ def get_today_fixtures():
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json().get("response", [])
-                for idx, match in enumerate(data[:10]):
+                current_time = datetime.now(IST)
+                
+                for match in data:
+                    utc_time_str = match['fixture']['date']
+                    match_utc = datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
+                    match_ist = match_utc.astimezone(IST)
+                    
+                    # අද දිනට අදාළ මැච් පමණක් ফিল্টার කිරීම
+                    tier = "Mega" if match['league']['name'] in ["Premier League", "La Liga", "UEFA Champions League", "Serie A", "Bundesliga"] else "Domestic"
+                    time_formatted = match_ist.strftime('%I:%M %p') # උදා: 08:30 PM
+                    
                     fixtures.append({
                         "id": match['fixture']['id'],
                         "home": match['teams']['home']['name'],
                         "away": match['teams']['away']['name'],
                         "home_id": match['teams']['home']['id'],
                         "away_id": match['teams']['away']['id'],
-                        "tier": "Mega" if match['league']['name'] in ["Premier League", "La Liga", "UEFA Champions League"] else "Domestic",
+                        "tier": tier,
                         "league": match['league']['name'],
+                        "time": time_formatted,
                         "venue": match.get('fixture', {}).get('venue', {}).get('city', 'Stadium')
                     })
         except Exception as e:
             print(f"Football API Error: {e}")
             
+    # API එකෙන් මැච් නොලැබුනහොත් හෝ වෙනත් දෝෂයකදී පෙන්වන Fallback ලැයිස්තුව
     if not fixtures:
         fixtures = [
-            {"id": 33, "home": "Manchester United", "away": "Arsenal", "home_id": 33, "away_id": 42, "tier": "Mega", "league": "Premier League", "venue": "Manchester"},
-            {"id": 34, "home": "Chelsea", "away": "Liverpool", "home_id": 49, "away_id": 40, "tier": "Mega", "league": "Premier League", "venue": "London"}
+            {"id": 33, "home": "Manchester United", "away": "Arsenal", "home_id": 33, "away_id": 42, "tier": "Mega", "league": "Premier League", "time": "Today", "venue": "Manchester"},
+            {"id": 34, "home": "Chelsea", "away": "Liverpool", "home_id": 49, "away_id": 40, "tier": "Mega", "league": "Premier League", "time": "Today", "venue": "London"}
         ]
     return fixtures
 
@@ -237,7 +254,7 @@ def generate_gemini_insight(match_name, res, lineups):
         return "Gemini API key not configured. Standard Quant Report applied."
     
     prompt = f"""
-    You are an elite sports betting quant analyst and football expert. 
+    You are an elite sports betting quant analyst and football expert covering 7 expert lenses (Tactical, Value/Odds, Risk Management, Weather/Physics, Injuries/Squad, Momentum, Bankroll). 
     Analyze this match data for {match_name}:
     - Home Win Prob: {res['home_prob']}%
     - Away Win Prob: {res['away_prob']}%
@@ -248,7 +265,7 @@ def generate_gemini_insight(match_name, res, lineups):
     - Injuries Count: {res['injuries']}
     - Lineups: {lineups if lineups else 'Not yet announced'}
     
-    Provide a short, punchy, professional betting recommendation (Value Back bet and Exchange Lay bet) based on these quantitative metrics. Keep it under 150 words.
+    Provide a short, punchy, professional betting recommendation (Value Back bet and Exchange Lay bet) based on these quantitative metrics incorporating the 7 expert lenses. Keep it under 150 words.
     """
     try:
         response = gemini_model.generate_content(prompt)
@@ -260,9 +277,9 @@ def generate_gemini_insight(match_name, res, lineups):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         "🔥 *Athena Quant Engine: Ultimate Gemini AI Edition* 🔥\n\n"
-        "✨ *Connected to Lineups, Live Stats, Weather & Gemini AI*\n\n"
+        "✨ *Connected to Lineups, Live Stats, Weather & Gemini AI (SL Time)*\n\n"
         "📌 *Commands:*\n"
-        "• `/matches` - View live fixtures\n"
+        "• `/matches` - View today's fixtures (Sri Lanka Time)\n"
         "• `/analyze_full [Index/Name]` - Deep AI Quant Report with Lineups\n"
         "• `/live_analyze [Index/Name]` - Live In-Play Tactical Scan\n"
         "• `/hedge_calc [Stake] [Original Odds] [Cover Odds]`\n"
@@ -272,7 +289,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def matches_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🏆 Top Tier / Live Fixtures", callback_data="tier_premier")],
+        [InlineKeyboardButton("🏆 Top Tier Fixtures", callback_data="tier_premier")],
         [InlineKeyboardButton("⚽ Domestic / Other Fixtures", callback_data="tier_domestic")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -287,10 +304,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filtered = [m for m in fixtures if m["tier"] == selected_tier]
     if not filtered: filtered = fixtures
         
-    text = f"⚽ *Live API Fixtures ({selected_tier}):*\n\n"
+    text = f"🇱🇰 *Today's Fixtures (Sri Lanka Time - {selected_tier}):*\n\n"
     for idx, m in enumerate(filtered):
-        text += f"[{idx}] {m['home']} vs {m['away']} _({m.get('league', 'League')})_\n"
-    text += "\n👉 Use: `/analyze_full [Index]`"
+        match_time = m.get('time', 'Today')
+        text += f"[{idx}] {m['home']} vs {m['away']}\n    🕒 *Time:* {match_time} | 🏆 _{m.get('league', 'League')}_\n\n"
+    text += "👉 Use: `/analyze_full [Index]`"
     await query.edit_message_text(text=text, parse_mode="Markdown")
 
 async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -335,7 +353,7 @@ async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYP
         f"📊 *Probabilities:*\n"
         f"• Home: **{res['home_prob']}%** | Draw: **{res['draw_prob']}%** | Away: **{res['away_prob']}%**\n"
         f"• BTTS: **{res['btts_prob']}%** | Over 2.5: **{res['over25_prob']}%**\n\n"
-        f"🤖 *Gemini AI Expert Strategy:*\n{ai_insight}"
+        f"🤖 *Gemini AI 7-Lens Expert Strategy:*\n{ai_insight}"
     )
     await update.message.reply_text(report, parse_mode="Markdown")
 
@@ -390,7 +408,7 @@ def main():
     app.add_handler(CommandHandler("bankroll", bankroll_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Athena Gemini AI Quant Master Bot is running...")
+    print("Athena Gemini AI Quant Master Bot is running with Sri Lanka Time support...")
     app.run_polling()
 
 if __name__ == "__main__":
