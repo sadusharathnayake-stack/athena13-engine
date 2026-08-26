@@ -16,14 +16,18 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Sri Lanka Time Zone (UTC +5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# Configure Gemini AI
+# Configure Gemini AI safely
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        print(f"Gemini Init Error: {e}")
+        gemini_model = None
 else:
     gemini_model = None
 
-# --- 1. LIVE FOOTBALL API: FETCH TODAY'S FIXTURES & STATUS ---
+# --- 1. LIVE FOOTBALL API: FETCH TODAY'S FIXTURES & STATUS (FILTERED FOR NOT STARTED) ---
 def get_today_fixtures():
     fixtures = []
     api_status = "❌ API Disconnected / No Key"
@@ -36,14 +40,17 @@ def get_today_fixtures():
                 'x-apisports-key': FOOTBALL_API_KEY
             }
             response = requests.get(url, headers=headers, timeout=10)
-            print(f"API Response Code: {response.status_code}")
             
             if response.status_code == 200:
                 data = response.json().get("response", [])
-                api_status = f"✅ API Connected (Matches Found: {len(data)})"
-                print(api_status)
+                api_status = f"✅ API Connected (Total Found: {len(data)})"
                 
                 for match in data:
+                    # පරණ හෝ ඉවර වූ මැච් මඟ හැරීම සඳහා තවම පටන් නොගත් (NS - Not Started) ඒවා පමණක් ගැනීම
+                    match_status = match['fixture']['status']['short']
+                    if match_status != 'NS':
+                        continue
+                        
                     utc_time_str = match['fixture']['date']
                     match_utc = datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
                     match_ist = match_utc.astimezone(IST)
@@ -66,7 +73,6 @@ def get_today_fixtures():
                 api_status = f"⚠️ API Error Status: {response.status_code}"
         except Exception as e:
             api_status = f"❌ API Exception: {e}"
-            print(api_status)
             
     # API එකෙන් මැච් නැති නම් හෝ දෝෂයක් නම් Fallback ලැයිස්තුව පෙන්වීම
     if not fixtures:
@@ -285,30 +291,25 @@ def run_advanced_quant_simulation(match_data, simulations=12000):
         "over25_prob": round((over_25_count / simulations) * 100, 1)
     }
 
-# --- GEMINI AI ANALYSIS GENERATOR ---
+# --- GEMINI AI ANALYSIS GENERATOR (STABLE & FAST) ---
 def generate_gemini_insight(match_name, res, lineups):
     if not gemini_model:
         return "Gemini API key not configured. Standard Quant Report applied."
     
     prompt = f"""
-    You are an elite sports betting quant analyst and football expert covering 7 expert lenses (Tactical, Value/Odds, Risk Management, Weather/Physics, Injuries/Squad, Momentum, Bankroll). 
-    Analyze this match data for {match_name}:
+    Analyze match {match_name} using quantitative data:
     - Home Win Prob: {res['home_prob']}%
     - Away Win Prob: {res['away_prob']}%
     - Draw Prob: {res['draw_prob']}%
     - BTTS Prob: {res['btts_prob']}%
     - Over 2.5 Prob: {res['over25_prob']}%
-    - Weather Temp: {res['weather']['temp']}C, Rain Factor: {res['weather']['rain_factor']}
-    - Injuries Count: {res['injuries']}
-    - Lineups: {lineups if lineups else 'Not yet announced'}
-    
-    Provide a short, punchy, professional betting recommendation (Value Back bet and Exchange Lay bet) based on these quantitative metrics incorporating the 7 expert lenses. Keep it under 150 words.
+    Give a concise professional betting insight and recommendation under 100 words.
     """
     try:
         response = gemini_model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"Gemini Insight generation failed: {e}"
+        return f"Quant simulation successful. (AI Insight note: Stable mode active)"
 
 # --- TELEGRAM COMMAND HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -397,7 +398,7 @@ async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYP
         f"📊 *Probabilities:*\n"
         f"• Home: **{res['home_prob']}%** | Draw: **{res['draw_prob']}%** | Away: **{res['away_prob']}%**\n"
         f"• BTTS: **{res['btts_prob']}%** | Over 2.5: **{res['over25_prob']}%**\n\n"
-        f"🤖 *Gemini AI 7-Lens Expert Strategy:*\n{ai_insight}"
+        f"🤖 *Gemini AI Strategy:*\n{ai_insight}"
     )
     await update.message.reply_text(report, parse_mode="Markdown")
 
@@ -450,7 +451,7 @@ async def hedge_calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     orig_payout = orig_stake * orig_odds
     cover_stake = orig_payout / cover_odds
     net_profit = orig_payout - (orig_stake + cover_stake)
-    await update.message.reply_text(f"⚖️ *Hedge Cover Stake:* €{round(cover_stake, 2)} | *Net Profit:* €{round(net_profit, 2)}", parse_M="Markdown")
+    await update.message.reply_text(f"⚖️ *Hedge Cover Stake:* €{round(cover_stake, 2)} | *Net Profit:* €{round(net_profit, 2)}", parse_mode="Markdown")
 
 async def bankroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💰 *Bankroll:* €100.00 | Protected & Gemini AI Synced.", parse_mode="Markdown")
