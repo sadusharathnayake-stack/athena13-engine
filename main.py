@@ -88,15 +88,12 @@ def find_match_smart(query_arg):
     # 1. Check if query is Match ID or Index
     if query_clean.isdigit():
         num = int(query_clean)
-        # Check by Match ID first
         for m in fixtures:
             if m["id"] == num:
                 return m
-        # If not found as ID, check as Index in today's list
         if 0 <= num < len(fixtures):
             return fixtures[num]
             
-        # Try fetching directly by fixture ID from API if not in today's list
         if FOOTBALL_API_KEY:
             try:
                 url = f"https://v3.football.api-sports.io/fixtures?id={num}"
@@ -120,7 +117,7 @@ def find_match_smart(query_arg):
             except Exception:
                 pass
 
-    # 2. Check if query contains "vs" (e.g., "Real Madrid vs Real Sociedad")
+    # 2. Check if query contains "vs"
     if "vs" in query_clean:
         parts = query_clean.split("vs")
         team_a = parts[0].strip()
@@ -130,12 +127,12 @@ def find_match_smart(query_arg):
                (team_b in m["home"].lower() and team_a in m["away"].lower()):
                 return m
 
-    # 3. Check exact or strict word match in today's list
+    # 3. Check exact or strict word match
     for m in fixtures:
         if query_clean == m["home"].lower() or query_clean == m["away"].lower():
             return m
             
-    # 4. Fallback to API team search if not found locally
+    # 4. Fallback to API team search
     if FOOTBALL_API_KEY:
         try:
             search_url = f"https://v3.football.api-sports.io/teams?search={query_arg}"
@@ -333,31 +330,37 @@ def run_advanced_quant_simulation(match_data, simulations=12000):
         "over25_prob": round((over_25_count / simulations) * 100, 1)
     }
 
-# --- GEMINI AI ANALYSIS GENERATOR (STABLE & FAST) ---
+# --- GEMINI AI ANALYSIS GENERATOR (ENHANCED WITH LINEUPS) ---
 def generate_gemini_insight(match_name, res, lineups):
     if not gemini_model:
         return "Gemini API key not configured. Standard Quant Report applied."
     
+    lineup_summary = "Not announced yet"
+    if lineups:
+        lineup_summary = ", ".join([f"{team} ({data['formation']})" for team, data in lineups.items()])
+
     prompt = f"""
-    Analyze match {match_name} using quantitative data:
+    Analyze match {match_name} using quantitative data and lineups:
     - Home Win Prob: {res['home_prob']}%
     - Away Win Prob: {res['away_prob']}%
     - Draw Prob: {res['draw_prob']}%
     - BTTS Prob: {res['btts_prob']}%
     - Over 2.5 Prob: {res['over25_prob']}%
-    Give a concise professional betting insight and recommendation under 100 words.
+    - Confirmed Lineups/Formations: {lineup_summary}
+    - Injuries Count: {res['injuries']}
+    Give a concise professional tactical betting insight and recommendation under 100 words.
     """
     try:
         response = gemini_model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"Quant simulation successful. (AI Insight note: Stable mode active)"
+        return f"Quant simulation successful. (AI Insight note: Stable mode active - Error: {e})"
 
 # --- TELEGRAM COMMAND HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         "🔥 *Athena Quant Engine: Ultimate Gemini AI Edition* 🔥\n\n"
-        "✨ *Connected with Match IDs & Smart Recognition (SL Time)*\n\n"
+        "✨ *Connected with Match IDs, Lineups & Smart Recognition (SL Time)*\n\n"
         "📌 *Commands:*\n"
         "• `/matches` - View today's fixtures with Match IDs\n"
         "• `/analyze_full [Match ID, Team A vs Team B, or Index]` - Deep AI Quant Report\n"
@@ -400,9 +403,7 @@ async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     query_arg = " ".join(context.args)
-    
-    # මැසේජ් එක ලෝඩ් වෙන අතරතුර හිරවී ඇති බව නොපෙනී යාමට Loading State එකක් එකතු කර ඇත
-    loading_msg = await update.message.reply_text("⏳ මැච් ඩේටා සහ AI විශ්ලේෂණය සකස් කරමින් පවතී... කරුණාකර මොහොතක් රැඳී සිටින්න.")
+    loading_msg = await update.message.reply_text("⏳ මැච් ඩේටා, Lineups සහ AI විශ්ලේෂණය සකස් කරමින් පවතී... කරුණාකර මොහොතක් රැඳී සිටින්න.")
     
     try:
         matched = find_match_smart(query_arg)
@@ -418,7 +419,7 @@ async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYP
         lineup_text = ""
         if lineups:
             for team, l_data in lineups.items():
-                lineup_text += f"• *{team}* ({l_data['formation']}) ✅\n"
+                lineup_text += f"• *{team}* (Form: `{l_data['formation']}`) ✅\n"
         else:
             lineup_text = "Lineups not announced yet.\n"
 
@@ -427,7 +428,7 @@ async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🏟️ **{res['home']} vs {res['away']}** (ID: `{matched['id']}`)\n"
             f"🌤️ Weather: {res['weather']['temp']}°C | Rain: {res['weather']['rain_factor']}\n"
             f"🏥 Injuries: {res['injuries']} players\n\n"
-            f"👕 *Lineups:*\n{lineup_text}\n"
+            f"👕 *Lineups / Formations:*\n{lineup_text}\n"
             f"📊 *Probabilities:*\n"
             f"• Home: **{res['home_prob']}%** | Draw: **{res['draw_prob']}%** | Away: **{res['away_prob']}%**\n"
             f"• BTTS: **{res['btts_prob']}%** | Over 2.5: **{res['over25_prob']}%**\n\n"
@@ -487,14 +488,14 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("matches", matches_command))
-    app.add_handler(CommandHandler("analyze", analyze_full_command))       # /analyze සඳහාද සහය
-    app.add_handler(CommandHandler("analyze_full", analyze_full_command)) # /analyze_full සඳහාද සහය
+    app.add_handler(CommandHandler("analyze", analyze_full_command))
+    app.add_handler(CommandHandler("analyze_full", analyze_full_command))
     app.add_handler(CommandHandler("live_analyze", live_analyze_command))
     app.add_handler(CommandHandler("hedge_calc", hedge_calc_command))
     app.add_handler(CommandHandler("bankroll", bankroll_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    print("Athena Gemini AI Quant Master Bot is running with Match IDs & Smart Recognition...")
+    print("Athena Gemini AI Quant Master Bot is running smoothly with optimized Lineups & AI prompts...")
     app.run_polling()
 
 if __name__ == "__main__":
