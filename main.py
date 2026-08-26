@@ -391,48 +391,57 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for idx, m in enumerate(filtered):
         match_time = m.get('time', 'Today')
         text += f"[{idx}] *{m['home']} vs {m['away']}*\n    🆔 *ID:* `{m['id']}` | 🕒 {match_time} | 🏆 _{m.get('league', 'League')}_\n\n"
-    text += "👉 Use: `/analyze_full [Match ID]` or `/analyze_full Real Madrid vs Real Sociedad`"
+    text += "👉 Use: `/analyze_full [Match ID]`"
     await query.edit_message_text(text=text, parse_mode="Markdown")
 
 async def analyze_full_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ මචන් Match ID එකක්, ටීම් දෙකේ නම (`Team A vs Team B`), හෝ Index එකක් දෙන්න!\nඋදා: `/analyze_full 103522` හෝ `/analyze_full Real Madrid vs Real Sociedad`", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ මචන් Match ID එකක්, ටීම් දෙකේ නම (`Team A vs Team B`), හෝ Index එකක් දෙන්න!\nඋදා: `/analyze_full 1622637`", parse_mode="Markdown")
         return
     
     query_arg = " ".join(context.args)
-    matched = find_match_smart(query_arg)
-                
-    if not matched:
-        await update.message.reply_text(f"❌ '{query_arg}' සඳහා ක්‍රියාකාරී මැච් එකක් හමු නොවීය. කරුණාකර නිවැරදි Match ID එකක් හෝ ටීම් නම් දෙකක් ('Team A vs Team B') ලබා දෙන්න.")
-        return
-
-    res = run_advanced_quant_simulation(matched)
-    lineups = get_match_lineups(matched["id"])
-    ai_insight = generate_gemini_insight(f"{res['home']} vs {res['away']}", res, lineups)
     
-    lineup_text = ""
-    if lineups:
-        for team, l_data in lineups.items():
-            lineup_text += f"• *{team}* ({l_data['formation']}) ✅\n"
-    else:
-        lineup_text = "Lineups not announced yet.\n"
+    # මැසේජ් එක ලෝඩ් වෙන අතරතුර හිරවී ඇති බව නොපෙනී යාමට Loading State එකක් එකතු කර ඇත
+    loading_msg = await update.message.reply_text("⏳ මැච් ඩේටා සහ AI විශ්ලේෂණය සකස් කරමින් පවතී... කරුණාකර මොහොතක් රැඳී සිටින්න.")
+    
+    try:
+        matched = find_match_smart(query_arg)
+                    
+        if not matched:
+            await loading_msg.edit_text(f"❌ '{query_arg}' සඳහා ක්‍රියාකාරී මැච් එකක් හමු නොවීය. කරුණාකර නිවැරදි Match ID එකක් හෝ ටීම් නම් දෙකක් ලබා දෙන්න.")
+            return
 
-    report = (
-        f"⚡ *ATHENA GEMINI AI QUANT REPORT* ⚡\n\n"
-        f"🏟️ **{res['home']} vs {res['away']}** (ID: `{matched['id']}`)\n"
-        f"🌤️ Weather: {res['weather']['temp']}°C | Rain: {res['weather']['rain_factor']}\n"
-        f"🏥 Injuries: {res['injuries']} players\n\n"
-        f"👕 *Lineups:*\n{lineup_text}\n"
-        f"📊 *Probabilities:*\n"
-        f"• Home: **{res['home_prob']}%** | Draw: **{res['draw_prob']}%** | Away: **{res['away_prob']}%**\n"
-        f"• BTTS: **{res['btts_prob']}%** | Over 2.5: **{res['over25_prob']}%**\n\n"
-        f"🤖 *Gemini AI Strategy:*\n{ai_insight}"
-    )
-    await update.message.reply_text(report, parse_mode="Markdown")
+        res = run_advanced_quant_simulation(matched)
+        lineups = get_match_lineups(matched["id"])
+        ai_insight = generate_gemini_insight(f"{res['home']} vs {res['away']}", res, lineups)
+        
+        lineup_text = ""
+        if lineups:
+            for team, l_data in lineups.items():
+                lineup_text += f"• *{team}* ({l_data['formation']}) ✅\n"
+        else:
+            lineup_text = "Lineups not announced yet.\n"
+
+        report = (
+            f"⚡ *ATHENA GEMINI AI QUANT REPORT* ⚡\n\n"
+            f"🏟️ **{res['home']} vs {res['away']}** (ID: `{matched['id']}`)\n"
+            f"🌤️ Weather: {res['weather']['temp']}°C | Rain: {res['weather']['rain_factor']}\n"
+            f"🏥 Injuries: {res['injuries']} players\n\n"
+            f"👕 *Lineups:*\n{lineup_text}\n"
+            f"📊 *Probabilities:*\n"
+            f"• Home: **{res['home_prob']}%** | Draw: **{res['draw_prob']}%** | Away: **{res['away_prob']}%**\n"
+            f"• BTTS: **{res['btts_prob']}%** | Over 2.5: **{res['over25_prob']}%**\n\n"
+            f"🤖 *Gemini AI Strategy:*\n{ai_insight}"
+        )
+        await loading_msg.edit_text(report, parse_mode="Markdown")
+        
+    except Exception as e:
+        print(f"Analyze Command Error: {e}")
+        await loading_msg.edit_text(f"⚠️ දෝෂයක් සිදු විය: {str(e)}")
 
 async def live_analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("⚠️ Match ID එකක් හෝ Index එකක් දෙන්න!\nඋදා: `/live_analyze 103522`", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ Match ID එකක් හෝ Index එකක් දෙන්න!\nඋදා: `/live_analyze 1622637`", parse_mode="Markdown")
         return
     
     query_arg = " ".join(context.args)
